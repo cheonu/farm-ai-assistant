@@ -74,10 +74,10 @@ Always base your responses on the actual data provided, not general assumptions.
                 try:
                     expected_date = datetime.fromisoformat(pig['expectedDeliveryDate'].replace('Z', ''))
                     if today > expected_date:
-                      days_overdue = (today - expected_date).days 
-                      overdue_pigs.append({
-                        "tag": pig.get ("tag_number", pig.get ("tagNumber")),
-                        "day_overdue": days_overdue
+                        days_overdue = (today - expected_date).days 
+                        overdue_pigs.append({
+                            "tag": pig.get("tag_number", pig.get("tagNumber")),
+                            "days_overdue": days_overdue
                         })
                 except: 
                     pass
