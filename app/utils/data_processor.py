@@ -97,7 +97,22 @@ class FarmDataProcessor:
                         breeding_status["pregnant_pigs"].append(pig_breeding_info)
                 except ValueError:
                     pass  # Skip invalid dates
-            
+
+            # sows which have actually farrowed
+            if pig.get("actualDeliveryDate"):
+                try:
+                    actual_delivery_date = datetime.fromisoformat(
+                        pig["actualDeliveryDate"].replace("Z", "")
+                    )
+                    days_since_delivery = (today - actual_delivery_date).days
+                    if 0 <= days_since_delivery <= 7:
+                        breeding_status["recently_farrowed"].append({
+                            "pig_id": pig_id,
+                            "days_since_delivery": days_since_delivery
+                        })
+                except ValueError:
+                    pass
+
             elif pig.get("gender") in ["Sow", "Gilt"] and pig.get("expectedHeatDate"):
                 try:
                     heat_date = datetime.fromisoformat(
