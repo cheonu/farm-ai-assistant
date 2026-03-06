@@ -9,12 +9,28 @@ class EmbeddingService:
 
     def embed_text(self, text: str) -> List[float]:
         """Generate embedding for single text."""
-        pass
+        embedding = self.model.encode (text)
+        return embedding.tolist ()
 
     def embed_batch(self, texts: List[str], batch_size: int = 32) -> List[List[float]]:
         """Generate embeddings for multiple texts."""
-        pass
+        embeddings = self.model.encode(
+            texts, 
+            batch_size=batch_size,
+            show_progress_bar=True
+            )
+        return embeddings.tolist()
 
     def get_embedding_dimension(self) -> int:
         """Return dimension of embedding vectors."""
-        pass
+        return self.model.get_sentence_embedding_dimension()
+
+    # error handling 
+    def embed_text (self, text: str) -> List[float]:
+        try:
+            embedding = self.model.encode(text)
+            return embedding.tolist()
+        except Exception as e:
+            print(f"Error embedding text: {e}")
+            # return zero vector as fallback
+            return [0.0] * self.get_embedding_dimension()
