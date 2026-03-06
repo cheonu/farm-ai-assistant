@@ -87,11 +87,17 @@ class FarmResponse(BaseModel):
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "farm-ai-assistant"}
+    """Health check endpoint for Render"""
+    return {"status": "healthy", "service": "farm-ai-assistant", "rag": "enabled"}
 
 @app.get("/")
 async def root():
-    return {"message": "Farm AI Assistant is running!", "rag_enabled": True}
+    """Root endpoint"""
+    return {
+        "message": "Farm AI Assistant is running!", 
+        "rag_enabled": True,
+        "version": os.getenv("APP_VERSION", "2.0.0")
+    }
 
 @app.post("/ask", response_model=FarmResponse)
 async def ask_farm_question(query: FarmQuery):
