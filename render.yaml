@@ -9,6 +9,8 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.7
+      - key: PORT
+        value: 10000
       - key: OPENAI_API_KEY
         sync: false
       - key: APP_NAME

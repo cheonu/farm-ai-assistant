@@ -22,6 +22,13 @@ app = FastAPI(
     description="AI-powered farm management assistant"
 )
 
+@app.on_event("startup")
+async def startup_event():
+    """Startup event to signal the app is ready"""
+    print("=" * 50)
+    print("🚀 Farm AI Assistant starting up...")
+    print("=" * 50)
+
 # CORS middleware for React Native app
 app.add_middleware(
     CORSMiddleware,
