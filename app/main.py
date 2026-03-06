@@ -35,12 +35,27 @@ app.add_middleware(
 llm_service = FarmLLMService()
 data_processor = FarmDataProcessor()
 
-# Initialize RAG services
-embedding_service = EmbeddingService()
-vector_store = VectorStore(persist_directory="data/chroma_db")
-retrieval_engine = RetrievalEngine(embedding_service, vector_store)
-context_augmenter = ContextAugmenter(max_context_tokens=2000)
-rag_service = RagService(retrieval_engine, context_augmenter, llm_service)
+# RAG services - will be initialized on first use (lazy loading)
+embedding_service = None
+vector_store = None
+retrieval_engine = None
+context_augmenter = None
+rag_service = None
+
+def get_rag_service():
+    """Lazy-load RAG service on first use to avoid startup timeout"""
+    global embedding_service, vector_store, retrieval_engine, context_augmenter, rag_service
+    
+    if rag_service is None:
+        print("🔄 Initializing RAG services...")
+        embedding_service = EmbeddingService()
+        vector_store = VectorStore(persist_directory="data/chroma_db")
+        retrieval_engine = RetrievalEngine(embedding_service, vector_store)
+        context_augmenter = ContextAugmenter(max_context_tokens=2000)
+        rag_service = RagService(retrieval_engine, context_augmenter, llm_service)
+        print("✅ RAG services initialized")
+    
+    return rag_service
 
 class FarmQuery(BaseModel):
     question: str
@@ -56,13 +71,13 @@ class FarmResponse(BaseModel):
     rag_used: Optional[bool] = None
     retrieval_time_ms: Optional[int] = None
 
-@app.get("/")
-async def root():
-    return {"message": "Farm AI Assistant is running!"}
-
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "farm-ai-assistant"}
+
+@app.get("/")
+async def root():
+    return {"message": "Farm AI Assistant is running!", "rag_enabled": True}
 
 @app.post("/ask", response_model=FarmResponse)
 async def ask_farm_question(query: FarmQuery):
@@ -72,7 +87,10 @@ async def ask_farm_question(query: FarmQuery):
 
         # Use RAG-enhanced service if requested
         if query.use_rag:
-            rag_response = await rag_service.ask_with_rag(
+            # Lazy-load RAG service on first use
+            rag = get_rag_service()
+            
+            rag_response = await rag.ask_with_rag(
                 question=query.question,
                 farm_data=processed_data,
                 conversation_id=query.conversation_id,
