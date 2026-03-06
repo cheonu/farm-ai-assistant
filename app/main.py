@@ -31,8 +31,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize services
-llm_service = FarmLLMService()
+# Initialize services (with error handling)
+llm_service = None
+try:
+    llm_service = FarmLLMService()
+    print("✅ LLM service initialized")
+except Exception as e:
+    print(f"⚠️ LLM service initialization failed: {e}")
+    print("⚠️ App will start but LLM features will be limited")
+
 data_processor = FarmDataProcessor()
 
 # RAG services - will be initialized on first use (lazy loading)
@@ -82,6 +89,13 @@ async def root():
 @app.post("/ask", response_model=FarmResponse)
 async def ask_farm_question(query: FarmQuery):
     try:
+        # Check if LLM service is available
+        if llm_service is None:
+            raise HTTPException(
+                status_code=503, 
+                detail="LLM service not initialized. Check OPENAI_API_KEY environment variable."
+            )
+        
         # Process farm data
         processed_data = data_processor.process_farm_data(query.farm_data)
 
@@ -121,6 +135,8 @@ async def ask_farm_question(query: FarmQuery):
                 retrieval_time_ms=0
             )
     
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -134,4 +150,5 @@ async def analyze_farm_data(farm_data: Dict):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
