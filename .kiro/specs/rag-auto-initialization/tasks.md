@@ -1,0 +1,110 @@
+# Implementation Plan
+
+- [ ] 1. Write bug condition exploration test
+  - **Property 1: Bug Condition** - Automatic Database Population on Empty Collection
+  - **CRITICAL**: This test MUST FAIL on unfixed code - failure confirms the bug exists
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: This test encodes the expected behavior - it will validate the fix when it passes after implementation
+  - **GOAL**: Surface counterexamples that demonstrate the bug exists in GKE-like environment
+  - **Scoped PBT Approach**: Scope the property to concrete failing cases: empty ChromaDB collection with valid WhatsApp export file present
+  - Test that `ensure_vector_store_initialized()` successfully populates the database when ChromaDB collection is empty or doesn't exist and WhatsApp export file is present
+  - Test implementation details from Bug Condition: `isBugCondition(input)` where `(input.chromadb_collection_exists = false OR input.chromadb_collection_count = 0) AND input.whatsapp_file_exists = true`
+  - The test assertions should match the Expected Behavior Properties: WhatsApp file parsed, 14,667 messages processed, 1,274 chunks created, embeddings generated, ChromaDB populated, progress logged
+  - Create test environment that simulates GKE conditions (containerized paths, volume mounts)
+  - Test cases: missing WhatsApp file, missing ChromaDB directory, read-only filesystem, concurrent initialization, partial initialization failure
+  - Run test on UNFIXED code
+  - **EXPECTED OUTCOME**: Test FAILS (this is correct - it proves the bug exists)
+  - Document counterexamples found: database remains empty, silent failures, file path issues, permission errors, unhandled exceptions
+  - Mark task complete when test is written, run, and failure is documented
+  - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7_
+
+- [ ] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** - Skip Initialization When Database Already Populated
+  - **IMPORTANT**: Follow observation-first methodology
+  - Observe behavior on UNFIXED code for non-buggy inputs: when ChromaDB collection already contains data (count > 0)
+  - Observe: Initialization is skipped when database has existing chunks
+  - Observe: RAG queries return context correctly with populated database
+  - Observe: Embedding generation uses same model and parameters
+  - Observe: Chunking strategy uses same parameters (3-20 messages, 2-hour gap)
+  - Write property-based tests capturing observed behavior patterns from Preservation Requirements
+  - Test cases: skip initialization with existing data, RAG query results preservation, embedding model preservation, chunking strategy preservation
+  - Property-based testing generates many test cases for stronger guarantees across different database states
+  - Run tests on UNFIXED code
+  - **EXPECTED OUTCOME**: Tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6_
+
+- [ ] 3. Fix for RAG auto-initialization
+
+  - [ ] 3.1 Strengthen `ensure_vector_store_initialized()` in `app/main.py`
+    - Add file path validation: verify WhatsApp export file exists and is readable before parsing
+    - Check `WHATSAPP_EXPORT_PATH.exists()` and `WHATSAPP_EXPORT_PATH.is_file()`
+    - Log absolute path being checked for debugging
+    - Raise clear error if file is missing or not readable
+    - Add directory validation: verify ChromaDB persistence directory exists and is writable
+    - Check `VECTOR_DB_PATH.exists()` and create if missing
+    - Verify write permissions before initializing ChromaDB
+    - Log absolute path being used for debugging
+    - Enhance error handling: wrap each initialization stage in try-except blocks with specific error messages
+    - Catch parsing errors and log line number or message that failed
+    - Catch embedding errors and log which chunk failed
+    - Catch ChromaDB errors and log specific operation that failed
+    - Re-raise exceptions after logging to prevent silent failures
+    - Add progress logging: log detailed progress at each stage of initialization
+    - Log when initialization starts with file paths
+    - Log after parsing completes with message count
+    - Log after chunking completes with chunk count
+    - Log progress every 100 chunks during embedding generation
+    - Log when initialization completes successfully with final count
+    - Add validation after initialization: verify database was populated correctly
+    - Check `store.count()` after `add_chunks()` completes
+    - Compare expected chunk count with actual count
+    - Log warning if counts don't match
+    - Raise error if count is still 0 after initialization
+    - _Bug_Condition: isBugCondition(input) where (input.chromadb_collection_exists = false OR input.chromadb_collection_count = 0) AND input.whatsapp_file_exists = true AND input.initialization_attempted = true AND input.initialization_succeeded = false_
+    - _Expected_Behavior: For any application startup where ChromaDB collection is empty and WhatsApp export file is present, parse WhatsApp data, create chunks, generate embeddings, populate ChromaDB, log progress, enable RAG queries_
+    - _Preservation: Skip initialization when database already populated (count > 0), preserve RAG query behavior, embedding generation, parsing logic, search functionality, data persistence_
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6_
+
+  - [ ] 3.2 Improve `add_chunks()` in `app/services/vector_store.py`
+    - Improve progress logging: use logger instead of print statements
+    - Log at INFO level for visibility in production
+    - Include percentage complete in progress messages
+    - Add error handling for embedding generation: catch and log errors for individual chunks
+    - Wrap embedding generation in try-except per chunk
+    - Log which chunk failed with chunk ID and text preview
+    - Continue processing remaining chunks instead of failing completely
+    - Track and report count of failed chunks
+    - Add validation before ChromaDB insert: verify embeddings are valid
+    - Check that embeddings are not None or empty
+    - Check that embedding dimensions match expected size
+    - Skip chunks with invalid embeddings and log warning
+    - _Bug_Condition: isBugCondition(input) where initialization is attempted but fails during embedding or storage_
+    - _Expected_Behavior: Handle errors gracefully, log progress, continue processing remaining chunks, validate embeddings before insert_
+    - _Preservation: Preserve existing embedding generation logic, ChromaDB storage format, batch processing behavior_
+    - _Requirements: 2.4, 2.5, 2.6, 3.2, 3.4_
+
+  - [ ] 3.3 Verify bug condition exploration test now passes
+    - **Property 1: Expected Behavior** - Automatic Database Population on Empty Collection
+    - **IMPORTANT**: Re-run the SAME test from task 1 - do NOT write a new test
+    - The test from task 1 encodes the expected behavior
+    - When this test passes, it confirms the expected behavior is satisfied
+    - Run bug condition exploration test from step 1
+    - **EXPECTED OUTCOME**: Test PASSES (confirms bug is fixed)
+    - Verify: WhatsApp file parsed successfully, 14,667 messages processed, 1,274 chunks created, embeddings generated, ChromaDB populated, progress logged at each stage
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7_
+
+  - [ ] 3.4 Verify preservation tests still pass
+    - **Property 2: Preservation** - Skip Initialization When Database Already Populated
+    - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
+    - Run preservation property tests from step 2
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - Confirm all tests still pass after fix: initialization skipped with existing data, RAG queries return same results, embedding model unchanged, chunking strategy unchanged
+    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6_
+
+- [ ] 4. Checkpoint - Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise
+  - Verify bug condition test passes (database auto-initializes on empty collection)
+  - Verify preservation tests pass (existing behavior unchanged when database populated)
+  - Verify integration: full initialization flow works in Docker container
+  - Verify pod restart scenario with persistent volume maintains data

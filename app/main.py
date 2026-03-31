@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, List, Optional
 import os
+import logging
+from pathlib import Path
+from threading import Lock
 from dotenv import load_dotenv
 
 from .services.llm_service import FarmLLMService
@@ -11,6 +14,8 @@ from .services.embedding_service import EmbeddingService
 from .services.vector_store import VectorStore
 from .services.retrieval_engine import RetrievalEngine
 from .services.context_augmenter import ContextAugmenter
+from .services.whatsapp_parser import WhatsAppParser
+from .services.document_chunker import DocumentChunker
 from .utils.data_processor import FarmDataProcessor
 
 # Load environment variables
@@ -21,6 +26,11 @@ app = FastAPI(
     version=os.getenv("APP_VERSION", "1.0.0"),
     description="AI-powered farm management assistant"
 )
+
+logger = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+WHATSAPP_EXPORT_PATH = PROJECT_ROOT / "data" / "whatsapp_export.txt"
+VECTOR_DB_PATH = PROJECT_ROOT / "data" / "chroma_db"
 
 @app.on_event("startup")
 async def startup_event():
@@ -55,19 +65,56 @@ vector_store = None
 retrieval_engine = None
 context_augmenter = None
 rag_service = None
+rag_init_lock = Lock()
+
+
+def ensure_vector_store_initialized(store: VectorStore, embedder: EmbeddingService) -> None:
+    """Populate vector store from WhatsApp export if collection is empty."""
+    current_count = store.count()
+    if current_count > 0:
+        logger.info("Vector store already populated with %s chunks, skipping initialization", current_count)
+        return
+
+    logger.info("Vector store is empty; starting automatic WhatsApp ingestion")
+    if not WHATSAPP_EXPORT_PATH.exists():
+        logger.warning(
+            "WhatsApp export file not found at %s; skipping auto-initialization",
+            WHATSAPP_EXPORT_PATH,
+        )
+        return
+
+    parser = WhatsAppParser()
+    chunker = DocumentChunker(min_messages=3, max_messages=20, time_gap_hours=2)
+
+    messages = parser.parse_chat_file(str(WHATSAPP_EXPORT_PATH))
+    logger.info("Parsed %s WhatsApp messages", len(messages))
+
+    chunks = chunker.chunk_messages(messages)
+    logger.info("Created %s conversation chunks", len(chunks))
+
+    if not chunks:
+        logger.warning("No chunks generated from WhatsApp data; vector store remains empty")
+        return
+
+    logger.info("Generating embeddings and storing %s chunks in ChromaDB", len(chunks))
+    store.add_chunks(chunks, embedder)
+    logger.info("Automatic vector store initialization completed; stored chunks=%s", store.count())
 
 def get_rag_service():
     """Lazy-load RAG service on first use to avoid startup timeout"""
     global embedding_service, vector_store, retrieval_engine, context_augmenter, rag_service
     
     if rag_service is None:
-        print("🔄 Initializing RAG services...")
-        embedding_service = EmbeddingService()
-        vector_store = VectorStore(persist_directory="data/chroma_db")
-        retrieval_engine = RetrievalEngine(embedding_service, vector_store)
-        context_augmenter = ContextAugmenter(max_context_tokens=2000)
-        rag_service = RagService(retrieval_engine, context_augmenter, llm_service)
-        print("✅ RAG services initialized")
+        with rag_init_lock:
+            if rag_service is None:
+                print("🔄 Initializing RAG services...")
+                embedding_service = EmbeddingService()
+                vector_store = VectorStore(persist_directory=str(VECTOR_DB_PATH))
+                ensure_vector_store_initialized(vector_store, embedding_service)
+                retrieval_engine = RetrievalEngine(embedding_service, vector_store)
+                context_augmenter = ContextAugmenter(max_context_tokens=2000)
+                rag_service = RagService(retrieval_engine, context_augmenter, llm_service)
+                print("✅ RAG services initialized")
     
     return rag_service
 

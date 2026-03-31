@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vector-db-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: farm-ai-assistant
+  labels:
+    app: farm-ai-assistant
+spec:
+  replicas: 1  # Single replica - RWO PVC can only attach to one node
+  selector:
+    matchLabels:
+      app: farm-ai-assistant
+  template:
+    metadata:
+      labels:
+        app: farm-ai-assistant
+    spec:
+      containers:
+      - name: farm-ai-assistant
+        image: cheonu/farm-ai-assistant:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: farm-ai-secrets
+              key: openai-api-key
+        - name: APP_NAME
+          value: "Farm AI Assistant with RAG"
+        - name: APP_VERSION
+          value: "2.0.0"
+        - name: ALLOWED_ORIGINS
+          value: "*"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:  # Self-healing: restart if unhealthy
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 5
+        readinessProbe:  # Don't send traffic until ready
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 10
+        volumeMounts:
+        - name: vector-db
+          mountPath: /app/data/chroma_db
+      volumes:
+      - name: vector-db
+        persistentVolumeClaim:
+          claimName: vector-db-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: farm-ai-assistant-service
+spec:
+  type: ClusterIP
+  selector:
+    app: farm-ai-assistant
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8000

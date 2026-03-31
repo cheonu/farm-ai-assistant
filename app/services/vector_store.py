@@ -12,29 +12,34 @@ class VectorStore:
             metadata={"hnsw:space": "cosine"}
         )
 
-    def add_chunks(self, chunks: List[DocumentChunk]) -> None:
+    def add_chunks(self, chunks: List[DocumentChunk], embedding_service) -> None:
         """Add document chunks with embeddings to store."""
-        valid_chunks = [c for c in chunks if c.embedding is not None]
-
-        if not valid_chunks:
-            print ("No chunks with embeddings to add")
+        if not chunks:
+            print("No chunks to add")
             return
         
-        # extract data from embeddings
-        ids = [chunk.id for chunk in valid_chunks]
-        embeddings = [chunk.embedding for chunk in valid_chunks]
-        documents=[chunk.text for chunk in valid_chunks]
-        metadatas = [chunk.metadata for chunk in valid_chunks]
+        # Generate embeddings for chunks
+        print(f"Generating embeddings for {len(chunks)} chunks...")
+        for idx, chunk in enumerate(chunks, start=1):
+            chunk.embedding = embedding_service.embed_text(chunk.text)
+            if idx % 100 == 0 or idx == len(chunks):
+                print(f"Progress: embedded {idx}/{len(chunks)} chunks")
+        
+        # Extract data for ChromaDB
+        chunk_ids = [chunk.id for chunk in chunks]
+        embeddings = [chunk.embedding for chunk in chunks]
+        documents = [chunk.text for chunk in chunks]
+        metadatas = [chunk.metadata for chunk in chunks]
 
-        # add to chromadb
+        # Add to chromadb
         self.collection.add(
-            ids=ids,
+            ids=chunk_ids,
             embeddings=embeddings,
             documents=documents,
             metadatas=metadatas
         )
 
-        print(f"Added {len(valid_chunks)} chunks to vector store")
+        print(f"✅ Added {len(chunks)} chunks to vector store")
 
 
     def query(self, query_embedding: List[float], top_k: int = 5,
@@ -81,5 +86,4 @@ class VectorStore:
             name="whatsapp_history",
             metadata={"hnsw:space": "cosine"}
         )
-
 
